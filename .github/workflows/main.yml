@@ -1,0 +1,144 @@
+name: Build unsigned IPA (KMP, JDK 11)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    runs-on: macos-14
+
+    env:
+      APP_SCHEME: "iosApp"                                   # имя схемы Xcode
+      XCODE_CONTAINER: "iosApp/iosApp.xcodeproj"             # явный путь к проекту
+      XC_CONFIG: "iosApp/Configuration/Config.xcconfig"      # твой xcconfig
+      ARCHIVE_PATH: ${{ github.workspace }}/build/ios/Archive.xcarchive
+      OUT_DIR: ${{ github.workspace }}/build/ios/ipa
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Temurin JDK 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Gradle prepare (optional)
+        shell: bash
+        run: |
+          set -e
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon :assemble || true
+            ./gradlew --no-daemon :shared:assemble || true
+            ./gradlew --no-daemon :shared:podInstall || true
+          fi
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install CocoaPods (if Podfile exists)
+        if: hashFiles('**/Podfile') != ''
+        run: |
+          sudo gem install cocoapods --no-document
+          pod install
+
+      - name: List schemes (debug)
+        run: xcodebuild -list -project "${{ env.XCODE_CONTAINER }}"
+
+      - name: Archive (unsigned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${ARCHIVE_PATH}")"
+
+          xcodebuild archive \
+            -project "${XCODE_CONTAINER}" \
+            -scheme "${APP_SCHEME}" \
+            -configuration Release \
+            -archivePath "${ARCHIVE_PATH}" \
+            -destination "generic/platform=iOS" \
+            -xcconfig "${XC_CONFIG}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            PROVISIONING_PROFILE="" \
+            CODE_SIGN_STYLE=Manual \
+            SKIP_INSTALL=NO \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=NO
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_DIR="${ARCHIVE_PATH}/Products/Applications"
+          APP_PATH="$(/usr/bin/find "$APP_DIR" -maxdepth 1 -name "*.app" -print -quit)"
+          if [ -z "${APP_PATH:-}" ]; then
+            echo "No .app found in $APP_DIR"; exit 1
+          fi
+
+          mkdir -p "${OUT_DIR}/Payload"
+          cp -R "$APP_PATH" "${OUT_DIR}/Payload/"
+
+          DSYM_DIR="${ARCHIVE_PATH}/dSYMs"
+          if [ -d "$DSYM_DIR" ]; then
+            cp -R "$DSYM_DIR" "${OUT_DIR}/"
+            (cd "${OUT_DIR}" && /usr/bin/zip -r "bunnyviewer.dSYMs.zip" "dSYMs")
+          fi
+
+          (cd "${OUT_DIR}" && /usr/bin/zip -r "bunnyviewer-unsigned.ipa" "Payload")
+          echo "IPA path: ${OUT_DIR}/bunnyviewer-unsigned.ipa"
+
+      - name: Upload artifact (IPA + dSYMs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa
+          path: |
+            build/ios/ipa/bunnyviewer-unsigned.ipa
+            build/ios/ipa/bunnyviewer.dSYMs.zip
+
+      - name: Create tag
+        id: maketag
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="unsigned-${GITHUB_RUN_NUMBER}"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -a "$TAG" -m "Unsigned IPA build $GITHUB_RUN_NUMBER"
+          git push origin "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.maketag.outputs.tag }}
+          name: "Unsigned IPA – ${{ steps.maketag.outputs.tag }}"
+          body: |
+            Автоматическая сборка без подписи (Kotlin Multiplatform iOS, JDK 11).
+            Commit: ${{ github.sha }}
+          draft: false
+          prerelease: false
+          files: |
+            build/ios/ipa/bunnyviewer-unsigned.ipa
+            build/ios/ipa/bunnyviewer.dSYMs.zip
