@@ -23,7 +23,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # >>> Важно: JDK 17 для AGP <<<
       - name: Set up Temurin JDK 17
         id: setup-java
         uses: actions/setup-java@v4
@@ -31,7 +30,6 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # Прокидываем Java 17 всем последующим шагам (включая xcodebuild -> Gradle скрипт)
       - name: Export JAVA_HOME/PATH/GRADLE_OPTS
         run: |
           echo "JAVA_HOME=${{ steps.setup-java.outputs.path }}" >> "$GITHUB_ENV"
@@ -118,46 +116,42 @@ jobs:
           (cd "${OUT_DIR}" && /usr/bin/zip -r "bunnyviewer-unsigned.ipa" "Payload")
           echo "IPA path: ${OUT_DIR}/bunnyviewer-unsigned.ipa"
 
-      # ---------- ANDROID: unsigned + signed APK ----------
-      # Устанавливаем Android SDK компоненты, чтобы были zipalign/apksigner
-      - name: Install Android SDK tools
-        run: |
-          set -e
-          yes | /usr/local/share/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          /usr/local/share/android-sdk/cmdline-tools/latest/bin/sdkmanager \
-            "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-          echo "ANDROID_HOME=/usr/local/share/android-sdk" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=/usr/local/share/android-sdk" >> "$GITHUB_ENV"
-          echo "/usr/local/share/android-sdk/platform-tools" >> $GITHUB_PATH
-          echo "/usr/local/share/android-sdk/build-tools/34.0.0" >> $GITHUB_PATH
+      # ---------- ANDROID ----------
+      # Правильная установка SDK + build-tools (+ sdkmanager в PATH)
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          build-tools: 34.0.0
+          cmake: ""
+          ndk: ""
 
-      # Сборка release (unsigned)
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses
+
       - name: Assemble Android Release (unsigned)
         shell: bash
         run: |
           set -e
           chmod +x ./gradlew
-          # основной модуль приложения — composeApp
           ./gradlew --no-daemon :composeApp:assembleRelease || ./gradlew --no-daemon assembleRelease
 
-      # Находим APK (unsigned)
       - name: Locate unsigned APK
         id: findapk
         shell: bash
         run: |
           set -e
-          DIR1="composeApp/build/outputs/apk/release"
-          APK="$(ls -1 ${DIR1}/*unsigned*.apk 2>/dev/null | head -n1 || true)"
+          DIR="composeApp/build/outputs/apk/release"
+          APK="$(ls -1 ${DIR}/*unsigned*.apk 2>/dev/null | head -n1 || true)"
           if [ -z "$APK" ]; then
-            APK="$(ls -1 ${DIR1}/*.apk 2>/dev/null | head -n1 || true)"
+            APK="$(ls -1 ${DIR}/*.apk 2>/dev/null | head -n1 || true)"
           fi
           if [ -z "$APK" ]; then
-            echo "No APK found in ${DIR1}"; exit 1
+            echo "No APK found in ${DIR}"; exit 1
           fi
           echo "unsigned_apk=$APK" >> "$GITHUB_OUTPUT"
           echo "Found unsigned APK: $APK"
 
-      # Выравнивание и подпись с рандомным keystore/паролем
       - name: Zipalign & Sign APK (random keystore)
         id: signapk
         shell: bash
@@ -167,10 +161,11 @@ jobs:
           OUTDIR="build/android"
           mkdir -p "$OUTDIR"
 
-          # zipalign
-          /usr/local/share/android-sdk/build-tools/34.0.0/zipalign -f 4 "$UNSIGNED" "$OUTDIR/app-aligned.apk"
+          ZIPALIGN="$ANDROID_SDK_ROOT/build-tools/34.0.0/zipalign"
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner"
 
-          # генерим случайный пароль и keystore
+          "$ZIPALIGN" -f 4 "$UNSIGNED" "$OUTDIR/app-aligned.apk"
+
           PASS="$(openssl rand -hex 16)"
           KEYSTORE="$OUTDIR/ci-release.keystore"
           ALIAS="ci"
@@ -180,15 +175,12 @@ jobs:
             -storepass "$PASS" -keypass "$PASS" \
             -dname "CN=BunnyViewer CI, O=CI, C=US"
 
-          # подписываем
-          /usr/local/share/android-sdk/build-tools/34.0.0/apksigner sign \
+          "$APKSIGNER" sign \
             --ks "$KEYSTORE" --ks-pass pass:"$PASS" --key-pass pass:"$PASS" \
             --out "$OUTDIR/app-release-signed.apk" "$OUTDIR/app-aligned.apk"
 
-          # проверка
-          /usr/local/share/android-sdk/build-tools/34.0.0/apksigner verify --print-certs "$OUTDIR/app-release-signed.apk"
+          "$APKSIGNER" verify --print-certs "$OUTDIR/app-release-signed.apk"
 
-          # сохраним "секреты" в артефакты (НЕ в релиз)
           echo "$PASS" > "$OUTDIR/keystore_password.txt"
 
           echo "signed_apk=$OUTDIR/app-release-signed.apk" >> "$GITHUB_OUTPUT"
@@ -206,7 +198,6 @@ jobs:
             ${{ steps.signapk.outputs.signed_apk }}
             ${{ steps.signapk.outputs.keystore }}
             ${{ steps.signapk.outputs.pass_file }}
-
       # ---------- /ANDROID ----------
 
       - name: Upload artifact (IPA + dSYMs)
