@@ -26,68 +26,155 @@ import io.kamel.image.KamelImage
 import io.kamel.image.asyncPainterResource
 import kotlinx.coroutines.launch
 
+// FeedScreen.kt
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(onOpenPost: (Long) -> Unit) {
     val scope = rememberCoroutineScope()
     var posts by remember { mutableStateOf(LocalCache.readPosts()) }
     var refreshing by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var showMirrorDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        try {
+    fun load(force: Boolean = false) {
+        scope.launch {
+            if (refreshing) return@launch
             refreshing = true
-            posts = Api.getUpdates().also { LocalCache.savePosts(it) }
-        } finally {
-            refreshing = false
+            error = null
+            try {
+                val loaded = Api.getUpdates()
+                posts = loaded
+                LocalCache.savePosts(loaded)
+            } catch (t: Throwable) {
+                // не падаем — показываем ошибку
+                if (posts.isEmpty()) {
+                    error = "Не удалось загрузить данные: ${t.message ?: "ошибка сети"}"
+                } else {
+                    // есть кэш — не блокируем UI, просто покажем баннер/текст
+                    error = "Обновить не удалось: ${t.message ?: "ошибка сети"}"
+                }
+            } finally {
+                refreshing = false
+            }
         }
     }
+
+    LaunchedEffect(Unit) { load() }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Лента") },
                 actions = {
-                    IconButton(onClick = {
-                        scope.launch {
-                            refreshing = true
-                            runCatching { Api.getUpdates() }.onSuccess {
-                                posts = it
-                                LocalCache.savePosts(it)
-                            }
-                            refreshing = false
-                        }
-                    }) {
+                    IconButton(onClick = { load(force = true) }) {
                         Icon(Icons.Default.Refresh, contentDescription = null)
                     }
                 }
             )
-
         }
     ) { inner ->
-        if (posts.isEmpty() && refreshing) {
-            Box(
-                Modifier.fillMaxSize().padding(inner),
-                contentAlignment = Alignment.Center
-            ) { CircularProgressIndicator() }
-        } else {
-            LazyColumn(Modifier.fillMaxSize().padding(inner)) {
-                items(posts, key = { it.id }) { post ->
-                    PostCard(
-                        post,
-                        onShare = { scope.launch { shareText(postShareText(post)) } },
-                        onSaveAll = {
-                            scope.launch {
-                                post.media.forEachIndexed { idx, m ->
-                                    val url = mediaUrl(m)
-                                    saveImageToGallery(url, "post_${post.id}_${idx}.jpg")
-                                }
-                            }
+        Column(Modifier.fillMaxSize().padding(inner)) {
+            // Ошибка (если была)
+            if (error != null) {
+                AssistChip(
+                    onClick = { showMirrorDialog = true },
+                    label = { Text(error!!) }
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { load(force = true) }) { Text("Повторить") }
+                    OutlinedButton(onClick = { showMirrorDialog = true }) { Text("Задать зеркало") }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // Контент
+            when {
+                posts.isEmpty() && refreshing -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+                posts.isEmpty() && !refreshing -> {
+                    // Пусто и ошибка — показываем дружелюбный пустой экран
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Данных нет")
+                            Spacer(Modifier.height(8.dp))
+                            Button(onClick = { load(force = true) }) { Text("Обновить") }
+                            Spacer(Modifier.height(8.dp))
+                            TextButton(onClick = { showMirrorDialog = true }) { Text("Ввести зеркало") }
                         }
-                    )
+                    }
+                }
+                else -> {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        items(posts, key = { it.id }) { post ->
+                            PostCard(
+                                post,
+                                onShare = { scope.launch { shareText(postShareText(post)) } },
+                                onSaveAll = {
+                                    scope.launch {
+                                        post.media.forEachIndexed { idx, m ->
+                                            val url = mediaUrl(m)
+                                            saveImageToGallery(url, "post_${post.id}_${idx}.jpg")
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                        item { Spacer(Modifier.height(12.dp)) }
+                    }
                 }
             }
         }
+
+        if (showMirrorDialog) {
+            MirrorDialog(
+                current = Api.getMirror().ifBlank { PlatformEnv.appUrl() },
+                onDismiss = { showMirrorDialog = false },
+                onApply = { newUrl ->
+                    Api.setMirror(newUrl)
+                    showMirrorDialog = false
+                    // после смены зеркала — пробуем заново
+                    posts = emptyList()
+                    load(force = true)
+                }
+            )
+        }
     }
+}
+
+@Composable
+private fun MirrorDialog(
+    current: String,
+    onDismiss: () -> Unit,
+    onApply: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Зеркало API") },
+        text = {
+            Column {
+                Text("Укажи базовый URL сервера (например, https://example.com):")
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("https://...") }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onApply(text) }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
 }
 
 @Composable
