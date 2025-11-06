@@ -1,8 +1,7 @@
 package com.github.saintedlittle.bunnyviewer.data
 
 
-import com.github.saintedlittle.bunnyviewer.platform.Files
-
+import com.github.saintedlittle.bunnyviewer.Files
 
 object LocalCache {
     private const val POSTS_FILE = "posts_cache.json"

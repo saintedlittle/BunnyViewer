@@ -1,7 +1,8 @@
 package com.github.saintedlittle.bunnyviewer.data
 
 
-import com.github.saintedlittle.bunnyviewer.platform.KV
+import com.github.saintedlittle.bunnyviewer.KV
+import com.github.saintedlittle.bunnyviewer.KV.observe
 import kotlinx.coroutines.flow.map
 
 
@@ -15,11 +16,11 @@ object LocalAuth {
 
 
     fun hasAccount(): Boolean = KV.get<Account>(KEY_ACCOUNT) != null
-    fun hasAccountFlow() = KV.observe<Account?>(KEY_ACCOUNT).map { it != null }
+    fun hasAccountFlow() = observe<Account?>(KEY_ACCOUNT).map { it != null }
 
 
     fun isLoggedIn(): Boolean = KV.get<Boolean>(KEY_LOGGED) ?: false
-    fun isLoggedInFlow() = KV.observe<Boolean?>(KEY_LOGGED).map { it == true }
+    fun isLoggedInFlow() = observe<Boolean?>(KEY_LOGGED).map { it == true }
 
 
     fun setAccount(account: Account) = KV.put(KEY_ACCOUNT, account)

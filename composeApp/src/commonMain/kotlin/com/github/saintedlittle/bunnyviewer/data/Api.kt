@@ -1,13 +1,13 @@
 package com.github.saintedlittle.bunnyviewer.data
 
 
-import com.github.saintedlittle.bunnyviewer.platform.PlatformEnv
+import com.github.saintedlittle.bunnyviewer.PlatformEnv
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.*
-import io.ktor.client.plugins.ContentNegotiation
 import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.cache.HttpCache
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
