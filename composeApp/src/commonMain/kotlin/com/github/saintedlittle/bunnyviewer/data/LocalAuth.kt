@@ -1,6 +1,7 @@
 package com.github.saintedlittle.bunnyviewer.data
 
 import com.github.saintedlittle.bunnyviewer.KV
+import com.github.saintedlittle.bunnyviewer.KV.observe
 import kotlinx.coroutines.flow.map
 
 @kotlinx.serialization.Serializable
@@ -11,10 +12,11 @@ object LocalAuth {
     private const val KEY_LOGGED = "logged"
 
     fun hasAccount(): Boolean = KV.get<Account>(KEY_ACCOUNT) != null
-    fun hasAccountFlow() = KV.observe<Account>(KEY_ACCOUNT).map { it != null }      // ⬅️ без '?'
+
+    fun hasAccountFlow() = observe<Account>(KEY_ACCOUNT).map { it != null }
 
     fun isLoggedIn(): Boolean = KV.get<Boolean>(KEY_LOGGED) ?: false
-    fun isLoggedInFlow() = KV.observe<Boolean>(KEY_LOGGED).map { it == true }       // ⬅️ без '?'
+    fun isLoggedInFlow() = observe<Boolean>(KEY_LOGGED).map { it == true }
 
     fun setAccount(account: Account) = KV.put(KEY_ACCOUNT, account)
     fun login(account: Account) {

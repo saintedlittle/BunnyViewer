@@ -6,25 +6,38 @@ import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
 import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.engine.android.Android
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.net.URL
 
+// === Глобальная инициализация Android-контекста ===
+internal lateinit var appContext: Context
+    private set
+
+internal fun initAndroid(context: Context) {
+    if (!::appContext.isInitialized) {
+        appContext = context.applicationContext
+    }
+}
+
+// === Платформенная реализация ===
 class AndroidPlatform(private val context: Context) : Platform {
     override val name: String = "Android ${Build.VERSION.SDK_INT}"
 
     override fun getAppUrl(): String {
-        return "https://yourapp.com" // Замени на свой URL
+        return "https://yourapp.com" // TODO: замените на реальный сервер
     }
 
     override fun getKeyValue(): KeyValue = AndroidKeyValue(context)
@@ -39,36 +52,37 @@ class AndroidPlatform(private val context: Context) : Platform {
         return if (file.exists()) file.readText() else null
     }
 
-    override suspend fun saveImageToGallery(url: String, filenameHint: String?): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val filename = filenameHint ?: "image_${System.currentTimeMillis()}.jpg"
-            val connection = URL(url).openConnection()
-            val inputStream = connection.getInputStream()
+    override suspend fun saveImageToGallery(url: String, filenameHint: String?): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val filename = filenameHint ?: "image_${System.currentTimeMillis()}.jpg"
+                val connection = URL(url).openConnection()
+                val inputStream = connection.getInputStream()
 
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BunnyViewer")
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BunnyViewer")
+                    }
                 }
+
+                val uri = context.contentResolver.insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    contentValues
+                )
+
+                uri?.let {
+                    context.contentResolver.openOutputStream(it)?.use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                    true
+                } ?: false
+            } catch (e: Exception) {
+                e.printStackTrace()
+                false
             }
-
-            val uri = context.contentResolver.insert(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                contentValues
-            )
-
-            uri?.let {
-                context.contentResolver.openOutputStream(it)?.use { outputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-                true
-            } ?: false
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
         }
-    }
 
     override suspend fun shareText(text: String) = withContext(Dispatchers.Main) {
         val intent = Intent(Intent.ACTION_SEND).apply {
@@ -76,21 +90,26 @@ class AndroidPlatform(private val context: Context) : Platform {
             putExtra(Intent.EXTRA_TEXT, text)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        context.startActivity(Intent.createChooser(intent, "Share").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
+        context.startActivity(
+            Intent.createChooser(intent, "Share").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
     }
 }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "app_prefs")
 
 class AndroidKeyValue(private val context: Context) : KeyValue {
+    // Для синхронного get можно хранить только строки;
+    // остальную работу делаем через observe и (де)сериализацию на уровне вызывающего кода
     override fun <T : Any> get(key: String): T? {
-        return null // Используй observe() для асинхронного доступа
+        @Suppress("UNCHECKED_CAST")
+        return null as T?
     }
 
     override fun <T : Any> put(key: String, value: T?) {
-        GlobalScope.launch {
+        GlobalScope.launch(Dispatchers.IO) {
             context.dataStore.edit { prefs ->
                 val prefKey = stringPreferencesKey(key)
                 if (value == null) {
@@ -111,14 +130,11 @@ class AndroidKeyValue(private val context: Context) : KeyValue {
     }
 }
 
-// Singleton для хранения context
-internal object PlatformContextHolder {
-    lateinit var context: Context
-}
-
+// === (Де)сериализация для common expect ===
 val _json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-actual inline fun <reified T: Any> serialize(obj: T): String = _json.encodeToString(obj)
-actual inline fun <reified T: Any> deserialize(text: String): T = _json.decodeFromString(text)
+actual inline fun <reified T : Any> serialize(obj: T): String = _json.encodeToString(obj)
+actual inline fun <reified T : Any> deserialize(text: String): T = _json.decodeFromString(text)
 
-actual fun getPlatform(): Platform = AndroidPlatform(PlatformContextHolder.context)
+// === Доступ к Platform через глобальный appContext ===
+actual fun getPlatform(): Platform = AndroidPlatform(appContext)
