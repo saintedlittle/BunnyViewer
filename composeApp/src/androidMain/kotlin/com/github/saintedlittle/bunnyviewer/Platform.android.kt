@@ -1,9 +1,116 @@
 package com.github.saintedlittle.bunnyviewer
 
+import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.provider.MediaStore
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.GlobalScope
+import java.io.File
+import java.net.URL
 
-class AndroidPlatform : Platform {
+class AndroidPlatform(private val context: Context) : Platform {
     override val name: String = "Android ${Build.VERSION.SDK_INT}"
+
+    override fun getAppUrl(): String {
+        return "https://yourapp.com" // Замени на свой URL
+    }
+
+    override fun getKeyValue(): KeyValue = AndroidKeyValue(context)
+
+    override fun writeText(name: String, text: String) {
+        val file = File(context.filesDir, name)
+        file.writeText(text)
+    }
+
+    override fun readText(name: String): String? {
+        val file = File(context.filesDir, name)
+        return if (file.exists()) file.readText() else null
+    }
+
+    override suspend fun saveImageToGallery(url: String, filenameHint: String?): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val filename = filenameHint ?: "image_${System.currentTimeMillis()}.jpg"
+            val connection = URL(url).openConnection()
+            val inputStream = connection.getInputStream()
+
+            val contentValues = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BunnyViewer")
+                }
+            }
+
+            val uri = context.contentResolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+            )
+
+            uri?.let {
+                context.contentResolver.openOutputStream(it)?.use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+                true
+            } ?: false
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    override suspend fun shareText(text: String) = withContext(Dispatchers.Main) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(Intent.createChooser(intent, "Share").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
 }
 
-actual fun getPlatform(): Platform = AndroidPlatform()
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "app_prefs")
+
+class AndroidKeyValue(private val context: Context) : KeyValue {
+    override fun <T : Any> get(key: String): T? {
+        return null // Используй observe() для асинхронного доступа
+    }
+
+    override fun <T : Any> put(key: String, value: T?) {
+        GlobalScope.launch {
+            context.dataStore.edit { prefs ->
+                val prefKey = stringPreferencesKey(key)
+                if (value == null) {
+                    prefs.remove(prefKey)
+                } else {
+                    prefs[prefKey] = value.toString()
+                }
+            }
+        }
+    }
+
+    override fun <T : Any> observe(key: String): Flow<T?> {
+        val prefKey = stringPreferencesKey(key)
+        return context.dataStore.data.map { prefs ->
+            @Suppress("UNCHECKED_CAST")
+            prefs[prefKey] as? T
+        }
+    }
+}
+
+// Singleton для хранения context
+internal object PlatformContextHolder {
+    lateinit var context: Context
+}
+
+actual fun getPlatform(): Platform = AndroidPlatform(PlatformContextHolder.context)
