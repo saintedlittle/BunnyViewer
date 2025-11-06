@@ -3,6 +3,7 @@ package com.github.saintedlittle.bunnyviewer
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import android.provider.MediaStore
 import androidx.datastore.core.DataStore
@@ -14,9 +15,13 @@ import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.engine.android.Android
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -98,35 +103,35 @@ class AndroidPlatform(private val context: Context) : Platform {
     }
 }
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "app_prefs")
+class AndroidKeyValue(ctx: Context) : KeyValue {
+    private val prefs: SharedPreferences =
+        ctx.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
 
-class AndroidKeyValue(private val context: Context) : KeyValue {
-    // Для синхронного get можно хранить только строки;
-    // остальную работу делаем через observe и (де)сериализацию на уровне вызывающего кода
+    @Suppress("UNCHECKED_CAST")
     override fun <T : Any> get(key: String): T? {
-        @Suppress("UNCHECKED_CAST")
-        return null as T?
+        val s = prefs.getString(key, null)
+        return s as T?
     }
 
     override fun <T : Any> put(key: String, value: T?) {
-        GlobalScope.launch(Dispatchers.IO) {
-            context.dataStore.edit { prefs ->
-                val prefKey = stringPreferencesKey(key)
-                if (value == null) {
-                    prefs.remove(prefKey)
-                } else {
-                    prefs[prefKey] = value.toString()
-                }
-            }
+        with(prefs.edit()) {
+            if (value == null) remove(key) else putString(key, value.toString())
+            apply()
         }
     }
 
-    override fun <T : Any> observe(key: String): Flow<T?> {
-        val prefKey = stringPreferencesKey(key)
-        return context.dataStore.data.map { prefs ->
-            @Suppress("UNCHECKED_CAST")
-            prefs[prefKey] as? T
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : Any> observe(key: String): Flow<T?> = callbackFlow {
+        // стартовое значение
+        trySend(prefs.getString(key, null) as T?)
+
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { p, changed ->
+            if (changed == key) {
+                trySend(p.getString(key, null) as T?)
+            }
         }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 }
 
