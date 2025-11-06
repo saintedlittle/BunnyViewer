@@ -1,5 +1,7 @@
 package com.github.saintedlittle.bunnyviewer
 
+import io.ktor.client.engine.HttpClientEngineFactory
+import io.ktor.client.engine.darwin.Darwin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +11,8 @@ import platform.UIKit.*
 import platform.Photos.*
 import platform.posix.memcpy
 import kotlinx.cinterop.*
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -163,5 +167,10 @@ class IOSKeyValue : KeyValue {
         return flow as Flow<T?>
     }
 }
+
+val _json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+actual inline fun <reified T: Any> serialize(obj: T): String = _json.encodeToString(obj)
+actual inline fun <reified T: Any> deserialize(text: String): T = _json.decodeFromString(text)
 
 actual fun getPlatform(): Platform = IOSPlatform()

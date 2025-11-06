@@ -8,12 +8,15 @@ import android.provider.MediaStore
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import io.ktor.client.engine.HttpClientEngineFactory
+import io.ktor.client.engine.android.Android
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.GlobalScope
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.net.URL
 
@@ -112,5 +115,10 @@ class AndroidKeyValue(private val context: Context) : KeyValue {
 internal object PlatformContextHolder {
     lateinit var context: Context
 }
+
+val _json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+actual inline fun <reified T: Any> serialize(obj: T): String = _json.encodeToString(obj)
+actual inline fun <reified T: Any> deserialize(text: String): T = _json.decodeFromString(text)
 
 actual fun getPlatform(): Platform = AndroidPlatform(PlatformContextHolder.context)
