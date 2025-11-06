@@ -130,38 +130,35 @@ class IOSPlatform : Platform {
     }
 }
 
-@OptIn(ExperimentalForeignApi::class)
 class IOSKeyValue : KeyValue {
-    private val userDefaults = NSUserDefaults.standardUserDefaults
-    private val flows = mutableMapOf<String, MutableStateFlow<Any?>>()
+    private val defaults = NSUserDefaults.standardUserDefaults
+    private val flows = mutableMapOf<String, MutableStateFlow<String?>>()
 
+    // Всегда читаем как String (или null)
     override fun <T : Any> get(key: String): T? {
+        val s: String? = defaults.stringForKey(key)
         @Suppress("UNCHECKED_CAST")
-        return userDefaults.objectForKey(key) as? T
+        return s as T?
     }
 
+    // Всегда пишем только String; НИКАКОЙ serialize(value) здесь!
     override fun <T : Any> put(key: String, value: T?) {
         if (value == null) {
-            userDefaults.removeObjectForKey(key)
+            defaults.removeObjectForKey(key)
+            flows[key]?.value = null
         } else {
-            when (value) {
-                is String -> userDefaults.setObject(value, key)
-                is Int -> userDefaults.setInteger(value.toLong(), key)
-                is Long -> userDefaults.setInteger(value, key)
-                is Float -> userDefaults.setFloat(value, key)
-                is Double -> userDefaults.setDouble(value, key)
-                is Boolean -> userDefaults.setBool(value, key)
-                else -> userDefaults.setObject(value.toString(), key)
-            }
+            val stored = value as? String
+                ?: value.toString() // на случай, если кто-то всё же передаст не-String
+            defaults.setObject(stored, forKey = key)
+            flows.getOrPut(key) { MutableStateFlow(null) }.value = stored
         }
-        userDefaults.synchronize()
-
-        flows[key]?.value = value
+        defaults.synchronize()
     }
 
+    // Поток тоже строковый
     override fun <T : Any> observe(key: String): Flow<T?> {
         val flow = flows.getOrPut(key) {
-            MutableStateFlow(get<T>(key))
+            MutableStateFlow(defaults.stringForKey(key))
         }
         @Suppress("UNCHECKED_CAST")
         return flow as Flow<T?>
