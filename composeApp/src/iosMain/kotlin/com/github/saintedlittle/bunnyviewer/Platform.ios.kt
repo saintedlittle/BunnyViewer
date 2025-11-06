@@ -22,7 +22,7 @@ class IOSPlatform : Platform {
         UIDevice.currentDevice.systemName() + " " + UIDevice.currentDevice.systemVersion
 
     override fun getAppUrl(): String {
-        return "https://yourapp.com" // Замени на свой URL
+        return "https://docs.saintedlittle.jp" // Замени на свой URL
     }
 
     override fun getKeyValue(): KeyValue = IOSKeyValue()

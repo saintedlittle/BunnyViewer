@@ -42,7 +42,7 @@ class AndroidPlatform(private val context: Context) : Platform {
     override val name: String = "Android ${Build.VERSION.SDK_INT}"
 
     override fun getAppUrl(): String {
-        return "https://yourapp.com" // TODO: замените на реальный сервер
+        return "https://docs.saintedlittle.jp" // TODO: замените на реальный сервер
     }
 
     override fun getKeyValue(): KeyValue = AndroidKeyValue(context)
