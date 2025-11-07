@@ -55,6 +55,7 @@ kotlin {
             implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.0")
             implementation("media.kamel:kamel-image:1.0.8")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+            implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
         }
 
         iosMain.dependencies {

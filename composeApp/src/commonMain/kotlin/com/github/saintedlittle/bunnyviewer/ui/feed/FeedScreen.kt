@@ -25,6 +25,7 @@ import com.github.saintedlittle.bunnyviewer.data.PostDto
 import io.kamel.image.KamelImage
 import io.kamel.image.asyncPainterResource
 import kotlinx.coroutines.launch
+import kotlin.time.ExperimentalTime
 
 // FeedScreen.kt
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -177,6 +178,7 @@ private fun MirrorDialog(
     )
 }
 
+@OptIn(ExperimentalTime::class)
 @Composable
 private fun PostCard(post: PostDto, onShare: () -> Unit, onSaveAll: () -> Unit) {
     ElevatedCard(
@@ -184,23 +186,87 @@ private fun PostCard(post: PostDto, onShare: () -> Unit, onSaveAll: () -> Unit) 
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            Text(post.channel.title, style = MaterialTheme.typography.titleMedium)
-            if (post.text.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(post.text, maxLines = 6, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+            // Header: avatar + title + date
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // простая заглушка-аватар с инициалом
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    tonalElevation = 2.dp
+                ) {
+                    Box(
+                        Modifier.size(36.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            post.channel.title.firstOrNull()?.uppercase() ?: "•",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        post.channel.title,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        formatPrettyDate(post.date),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
+
+            if (post.text.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                ExpandableText(
+                    text = post.text,
+                    minLines = 3,
+                    maxLines = 10
+                )
+            }
+
             if (post.media.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 MediaPager(post.media)
             }
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = onShare, label = { Text("Поделиться") })
-                AssistChip(onClick = onSaveAll, label = { Text("Сохранить фото") })
+
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilledTonalButton(onClick = onShare) { Text("Поделиться") }
+                OutlinedButton(onClick = onSaveAll) { Text("Сохранить фото") }
                 Spacer(Modifier.weight(1f))
+                // мелкая мета
                 Text("👁 ${post.views ?: 0}")
+                Spacer(Modifier.width(4.dp))
                 Text("↗ ${post.forwards ?: 0}")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpandableText(
+    text: String,
+    minLines: Int,
+    maxLines: Int
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column {
+        Text(
+            text = text,
+            maxLines = if (expanded) maxLines else minLines,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (text.length > 140) {
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(if (expanded) "Скрыть" else "Показать ещё")
             }
         }
     }
@@ -216,22 +282,29 @@ private fun MediaPager(media: List<MediaDto>) {
             pageSpacing = 8.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 180.dp)
+                .aspectRatio(16f / 9f) // аккуратное окно под фото/видео
         ) { page ->
             val m = media[page]
             val url = mediaUrl(m)
-            val painterRes = asyncPainterResource(url)
-            Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-                Box(
-                    Modifier.fillMaxWidth().heightIn(min = 220.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    KamelImage(
-                        resource = painterRes,
-                        contentDescription = null,
-                        onLoading = { CircularProgressIndicator() },
-                        onFailure = { Text("Ошибка загрузки") }
-                    )
+            Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    when (m.type.lowercase()) {
+                        "photo", "image" -> {
+                            val res = asyncPainterResource(url)
+                            KamelImage(
+                                resource = res,
+                                contentDescription = null,
+                                onLoading = { CircularProgressIndicator() },
+                                onFailure = { Text("Не удалось загрузить изображение") },
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        }
+                        "video" -> {
+                            // пока заглушка для видео
+                            Text("Видео (${m.mime ?: ""})", style = MaterialTheme.typography.labelLarge)
+                        }
+                        else -> Text("Медиа: ${m.type}")
+                    }
                 }
             }
         }
@@ -259,12 +332,15 @@ private fun MediaPager(media: List<MediaDto>) {
     }
 }
 
-private fun mediaUrl(m: MediaDto): String =
-    if (m.filePath.startsWith("http"))
-        m.filePath
-    else
-        PlatformEnv.appUrl().trimEnd('/') + "/" + m.filePath.trimStart('/')
-
+private fun mediaUrl(m: MediaDto): String {
+    val p = m.filePath
+    return if (p.startsWith("http", ignoreCase = true)) p
+    else {
+        val baseUrl = PlatformEnv.appUrl()
+        val protocol = if (baseUrl.startsWith("http")) "" else "https://"
+        Api.run { protocol + baseUrl + "/" + p.trimStart('/') }
+    }
+}
 private fun postShareText(post: PostDto): String = buildString {
     appendLine(post.channel.title)
     if (post.text.isNotBlank()) appendLine(post.text)
