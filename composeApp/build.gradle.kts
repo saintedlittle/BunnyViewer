@@ -37,6 +37,7 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation("androidx.datastore:datastore-preferences:1.0.0")
             implementation("io.ktor:ktor-client-android:3.0.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
         }
         commonMain.dependencies {
             implementation(compose.runtime)
