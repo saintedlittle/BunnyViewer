@@ -240,11 +240,6 @@ private fun PostCard(post: PostDto, onShare: () -> Unit, onSaveAll: () -> Unit) 
             ) {
                 FilledTonalButton(onClick = onShare) { Text("Поделиться") }
                 OutlinedButton(onClick = onSaveAll) { Text("Сохранить фото") }
-                Spacer(Modifier.weight(1f))
-                // мелкая мета
-                Text("👁 ${post.views ?: 0}")
-                Spacer(Modifier.width(4.dp))
-                Text("↗ ${post.forwards ?: 0}")
             }
         }
     }
@@ -282,25 +277,38 @@ private fun MediaPager(media: List<MediaDto>) {
             pageSpacing = 8.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f) // аккуратное окно под фото/видео
+                .aspectRatio(16f / 9f)
         ) { page ->
             val m = media[page]
             val url = mediaUrl(m)
+
             Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     when (m.type.lowercase()) {
                         "photo", "image" -> {
-                            val res = asyncPainterResource(url)
-                            KamelImage(
-                                resource = res,
-                                contentDescription = null,
-                                onLoading = { CircularProgressIndicator() },
-                                onFailure = { Text("Не удалось загрузить изображение") },
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                            )
+                            // ключуем по URL, чтобы перерисовать ресурс при смене зеркала
+                            key(url) {
+                                val res = asyncPainterResource(url)
+                                KamelImage(
+                                    resource = res,
+                                    contentDescription = null,
+                                    onLoading = { CircularProgressIndicator() },
+                                    onFailure = {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("Не удалось загрузить изображение")
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                url,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                )
+                            }
                         }
                         "video" -> {
-                            // пока заглушка для видео
                             Text("Видео (${m.mime ?: ""})", style = MaterialTheme.typography.labelLarge)
                         }
                         else -> Text("Медиа: ${m.type}")
@@ -310,10 +318,7 @@ private fun MediaPager(media: List<MediaDto>) {
         }
         if (media.size > 1) {
             Spacer(Modifier.height(6.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
-            ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 repeat(media.size) { i ->
                     val active = pager.currentPage == i
                     Box(
@@ -333,14 +338,15 @@ private fun MediaPager(media: List<MediaDto>) {
 }
 
 private fun mediaUrl(m: MediaDto): String {
-    val p = m.filePath
-    return if (p.startsWith("http", ignoreCase = true)) p
-    else {
-        val baseUrl = PlatformEnv.appUrl()
-        val protocol = if (baseUrl.startsWith("http")) "" else "https://"
-        Api.run { protocol + baseUrl + "/" + p.trimStart('/') }
-    }
+    val p = m.filePath.trim()
+    if (p.startsWith("http", ignoreCase = true)) return p
+
+    // тот же базовый URL, что использует Api
+    val base = Api.getMirror().ifBlank { PlatformEnv.appUrl() }.trim().trimEnd('/')
+    return "$base/${p.trimStart('/')}"
 }
+
+
 private fun postShareText(post: PostDto): String = buildString {
     appendLine(post.channel.title)
     if (post.text.isNotBlank()) appendLine(post.text)
