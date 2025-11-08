@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.github.saintedlittle.bunnyviewer.PlatformEnv
@@ -293,10 +294,15 @@ private fun MediaPager(media: List<MediaDto>) {
                                     resource = res,
                                     contentDescription = null,
                                     onLoading = { CircularProgressIndicator() },
-                                    onFailure = {
+                                    onFailure = { error ->
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text("Не удалось загрузить изображение")
                                             Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                (error.message ?: error::class.simpleName ?: "ошибка"),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                             Text(
                                                 url,
                                                 style = MaterialTheme.typography.labelSmall,
@@ -304,7 +310,7 @@ private fun MediaPager(media: List<MediaDto>) {
                                             )
                                         }
                                     },
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    contentScale = ContentScale.Crop
                                 )
                             }
                         }
