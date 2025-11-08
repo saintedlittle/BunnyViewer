@@ -138,8 +138,11 @@ class AndroidKeyValue(ctx: Context) : KeyValue {
 // === (Де)сериализация для common expect ===
 val _json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-actual inline fun <reified T : Any> serialize(obj: T): String = _json.encodeToString(obj)
-actual inline fun <reified T : Any> deserialize(text: String): T = _json.decodeFromString(text)
+actual inline fun <reified T : Any> serialize(obj: T): String = 
+    _json.encodeToString(kotlinx.serialization.serializer(), obj)
+
+actual inline fun <reified T : Any> deserialize(text: String): T = 
+    _json.decodeFromString(kotlinx.serialization.serializer(), text)
 
 // === Доступ к Platform через глобальный appContext ===
 actual fun getPlatform(): Platform = AndroidPlatform(appContext)
