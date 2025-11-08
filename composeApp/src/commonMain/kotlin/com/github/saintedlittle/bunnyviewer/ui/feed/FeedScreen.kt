@@ -23,12 +23,18 @@ import com.github.saintedlittle.bunnyviewer.data.Api
 import com.github.saintedlittle.bunnyviewer.data.LocalCache
 import com.github.saintedlittle.bunnyviewer.data.MediaDto
 import com.github.saintedlittle.bunnyviewer.data.PostDto
-import io.kamel.image.KamelImage
-import io.kamel.image.asyncPainterResource
 import kotlinx.coroutines.launch
 import kotlin.time.ExperimentalTime
 
-// FeedScreen.kt
+// Платформенная загрузка изображений
+@Composable
+expect fun NetworkImage(
+    url: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop
+)
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(onOpenPost: (Long) -> Unit) {
@@ -48,11 +54,9 @@ fun FeedScreen(onOpenPost: (Long) -> Unit) {
                 posts = loaded
                 LocalCache.savePosts(loaded)
             } catch (t: Throwable) {
-                // не падаем — показываем ошибку
                 if (posts.isEmpty()) {
                     error = "Не удалось загрузить данные: ${t.message ?: "ошибка сети"}"
                 } else {
-                    // есть кэш — не блокируем UI, просто покажем баннер/текст
                     error = "Обновить не удалось: ${t.message ?: "ошибка сети"}"
                 }
             } finally {
@@ -76,21 +80,23 @@ fun FeedScreen(onOpenPost: (Long) -> Unit) {
         }
     ) { inner ->
         Column(Modifier.fillMaxSize().padding(inner)) {
-            // Ошибка (если была)
             if (error != null) {
                 AssistChip(
                     onClick = { showMirrorDialog = true },
-                    label = { Text(error!!) }
+                    label = { Text(error!!) },
+                    modifier = Modifier.padding(horizontal = 12.dp)
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                ) {
                     Button(onClick = { load(force = true) }) { Text("Повторить") }
                     OutlinedButton(onClick = { showMirrorDialog = true }) { Text("Задать зеркало") }
                 }
                 Spacer(Modifier.height(8.dp))
             }
 
-            // Контент
             when {
                 posts.isEmpty() && refreshing -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -98,7 +104,6 @@ fun FeedScreen(onOpenPost: (Long) -> Unit) {
                     }
                 }
                 posts.isEmpty() && !refreshing -> {
-                    // Пусто и ошибка — показываем дружелюбный пустой экран
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Данных нет")
@@ -113,7 +118,7 @@ fun FeedScreen(onOpenPost: (Long) -> Unit) {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(posts, key = { it.id }) { post ->
                             PostCard(
-                                post,
+                                post = post,
                                 onShare = { scope.launch { shareText(postShareText(post)) } },
                                 onSaveAll = {
                                     scope.launch {
@@ -138,7 +143,6 @@ fun FeedScreen(onOpenPost: (Long) -> Unit) {
                 onApply = { newUrl ->
                     Api.setMirror(newUrl)
                     showMirrorDialog = false
-                    // после смены зеркала — пробуем заново
                     posts = emptyList()
                     load(force = true)
                 }
@@ -181,16 +185,18 @@ private fun MirrorDialog(
 
 @OptIn(ExperimentalTime::class)
 @Composable
-private fun PostCard(post: PostDto, onShare: () -> Unit, onSaveAll: () -> Unit) {
+private fun PostCard(
+    post: PostDto,
+    onShare: () -> Unit,
+    onSaveAll: () -> Unit
+) {
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            // Header: avatar + title + date
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // простая заглушка-аватар с инициалом
                 Surface(
                     shape = MaterialTheme.shapes.large,
                     tonalElevation = 2.dp
@@ -272,6 +278,7 @@ private fun ExpandableText(
 @Composable
 private fun MediaPager(media: List<MediaDto>) {
     val pager = rememberPagerState(pageCount = { media.size })
+
     Column(Modifier.fillMaxWidth()) {
         HorizontalPager(
             state = pager,
@@ -287,41 +294,25 @@ private fun MediaPager(media: List<MediaDto>) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     when (m.type.lowercase()) {
                         "photo", "image" -> {
-                            // ключуем по URL, чтобы перерисовать ресурс при смене зеркала
-                            key(url) {
-                                val res = asyncPainterResource(url)
-                                KamelImage(
-                                    resource = res,
-                                    contentDescription = null,
-                                    onLoading = { CircularProgressIndicator() },
-                                    onFailure = { error ->
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("Не удалось загрузить изображение")
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(
-                                                (error.message ?: error::class.simpleName ?: "ошибка"),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Text(
-                                                url,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    },
-                                    contentScale = ContentScale.Crop
-                                )
-                            }
+                            NetworkImage(
+                                url = url,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
                         }
                         "video" -> {
-                            Text("Видео (${m.mime ?: ""})", style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                "Видео (${m.mime ?: ""})",
+                                style = MaterialTheme.typography.labelLarge
+                            )
                         }
                         else -> Text("Медиа: ${m.type}")
                     }
                 }
             }
         }
+
         if (media.size > 1) {
             Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -336,7 +327,9 @@ private fun MediaPager(media: List<MediaDto>) {
                                 shape = MaterialTheme.shapes.extraLarge
                             )
                     )
-                    Spacer(Modifier.width(6.dp))
+                    if (i < media.size - 1) {
+                        Spacer(Modifier.width(6.dp))
+                    }
                 }
             }
         }
@@ -347,11 +340,9 @@ private fun mediaUrl(m: MediaDto): String {
     val p = m.filePath.trim()
     if (p.startsWith("http", ignoreCase = true)) return p
 
-    // тот же базовый URL, что использует Api
     val base = Api.getMirror().ifBlank { PlatformEnv.appUrl() }.trim().trimEnd('/')
     return "$base/${p.trimStart('/')}"
 }
-
 
 private fun postShareText(post: PostDto): String = buildString {
     appendLine(post.channel.title)

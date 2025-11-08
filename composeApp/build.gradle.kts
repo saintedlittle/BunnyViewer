@@ -38,6 +38,8 @@ kotlin {
             implementation("androidx.datastore:datastore-preferences:1.0.0")
             implementation("io.ktor:ktor-client-android:3.0.0")
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
+            implementation("io.coil-kt:coil-compose:2.5.0")
+
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -54,12 +56,12 @@ kotlin {
             implementation("io.ktor:ktor-client-core:3.0.0")
             implementation("io.ktor:ktor-client-content-negotiation:3.0.0")
             implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.0")
-            implementation("media.kamel:kamel-image:1.0.8")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
         }
 
         iosMain.dependencies {
+            implementation("media.kamel:kamel-image:1.0.8")
             implementation("io.ktor:ktor-client-darwin:3.0.0")
         }
 
